@@ -1,0 +1,9 @@
+{
+	"name": "ADFTemplateFactory",
+	"location": "westus2",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "1f5b1a9f-fcaf-4d4c-aa5c-ecfd168dea0e",
+		"tenantId": "223c4af0-fdd1-4790-b5dd-e04751b04a0d"
+	}
+}

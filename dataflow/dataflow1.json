@@ -1,0 +1,78 @@
+{
+	"name": "dataflow1",
+	"properties": {
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "ADWSource",
+						"type": "DatasetReference"
+					},
+					"name": "SourceSystem"
+				},
+				{
+					"dataset": {
+						"referenceName": "ADFTemplate",
+						"type": "DatasetReference"
+					},
+					"name": "DestinationDW"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "ADFTemplate",
+						"type": "DatasetReference"
+					},
+					"name": "sink1"
+				}
+			],
+			"transformations": [
+				{
+					"name": "AddHashInput"
+				},
+				{
+					"name": "AddHashExisting"
+				},
+				{
+					"name": "NewAndUpdatedRows"
+				},
+				{
+					"name": "GetMaxSurrogateKey"
+				},
+				{
+					"name": "AddKey"
+				},
+				{
+					"name": "JoinWithMaxSurrogateKey"
+				},
+				{
+					"name": "AddColumns"
+				},
+				{
+					"name": "DropUnwantedColsInput"
+				},
+				{
+					"name": "MarkAsInsert"
+				},
+				{
+					"name": "FilterForUpdated"
+				},
+				{
+					"name": "UpdateObsolete"
+				},
+				{
+					"name": "MarkAsUpdates"
+				},
+				{
+					"name": "DropUnwantedColsUpdate"
+				},
+				{
+					"name": "Union1"
+				}
+			],
+			"script": "parameters{\n\tPrimaryKey as string,\n\tColumns as string,\n\tSKColName as string\n}\nsource(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> SourceSystem\nsource(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tisolationLevel: 'READ_UNCOMMITTED',\n\tformat: 'table') ~> DestinationDW\nSourceSystem derive(id_hash = sha1(byName($PrimaryKey)),\n\t\tcolumns_hash = sha1(byNames(split($Columns, ',')))) ~> AddHashInput\nDestinationDW derive(id_hash = sha1(byName($PrimaryKey)),\n\t\tcolumns_hash = sha1(byNames(split($Columns, ',')))) ~> AddHashExisting\nAddHashInput, AddHashExisting exists(AddHashInput@id_hash == AddHashExisting@id_hash\n\t&& AddHashInput@columns_hash == AddHashExisting@columns_hash,\n\tnegate:true,\n\tbroadcast: 'auto')~> NewAndUpdatedRows\nAddHashExisting aggregate(MaxSurrogateKey = max(toInteger(byName($SKColName)))) ~> GetMaxSurrogateKey\nNewAndUpdatedRows keyGenerate(output(Key as long),\n\tstartAt: 1L) ~> AddKey\nAddKey, GetMaxSurrogateKey join(Key == MaxSurrogateKey || true(),\n\tjoinType:'cross',\n\tbroadcast: 'auto')~> JoinWithMaxSurrogateKey\nJoinWithMaxSurrogateKey derive(SurrogateKey = Key + MaxSurrogateKey,\n\t\tDWValidFrom = currentUTC(),\n\t\tDWValidTo = toDate('9999-12-31')) ~> AddColumns\nAddColumns select(mapColumn(\n\t\teach(match(!in(['id_hash','MaxSurrogateKey','SurrogateKey','columns_hash','Key'],name))),\n\t\teach(match(name==\"SurrogateKey\"),\n\t\t\t$SKColName = $$)\n\t),\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true) ~> DropUnwantedColsInput\nDropUnwantedColsInput alterRow(insertIf(true())) ~> MarkAsInsert\nAddHashExisting, NewAndUpdatedRows exists(AddHashExisting@id_hash == AddHashInput@id_hash,\n\tnegate:false,\n\tbroadcast: 'auto')~> FilterForUpdated\nFilterForUpdated derive(DWValidTo = toDate(currentUTC())) ~> UpdateObsolete\nUpdateObsolete alterRow(updateIf(true())) ~> MarkAsUpdates\nMarkAsUpdates select(mapColumn(\n\t\teach(match(!in(['id_hash','columns_hash'],name)))\n\t),\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true) ~> DropUnwantedColsUpdate\nMarkAsInsert, DropUnwantedColsUpdate union(byName: true)~> Union1\nUnion1 sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:true,\n\tupsertable:false,\n\tkeys:[($PrimaryKey)],\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true,\n\terrorHandlingOption: 'stopOnFirstError') ~> sink1"
+		}
+	}
+}
